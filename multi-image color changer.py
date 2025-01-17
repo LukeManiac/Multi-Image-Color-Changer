@@ -10,6 +10,7 @@ class ImageEditorApp:
         self.root.resizable(False, False)
 
         self.images = []  # Stores dictionaries with image data
+        self.open_toplevels = {}  # Track open Toplevels by a unique key
         self.selected_image_index = None
 
         # Frames for layout
@@ -29,6 +30,15 @@ class ImageEditorApp:
 
         self.delete_button = tk.Button(self.left_frame, text="Delete Image", command=self.delete_image, state=tk.DISABLED)
         self.delete_button.pack(pady=5)
+
+        self.clear_button = tk.Button(self.left_frame, text="Clear All Images", command=self.clear_all_images, state=tk.DISABLED)
+        self.clear_button.pack(pady=5)
+
+        self.reset_changes_button = tk.Button(self.left_frame, text="Reset Changes", command=self.reset_changes, state=tk.DISABLED)
+        self.reset_changes_button.pack(pady=5)
+
+        self.reset_all_changes_button = tk.Button(self.left_frame, text="Reset All Changes", command=self.reset_all_changes, state=tk.DISABLED)
+        self.reset_all_changes_button.pack(pady=5)
 
         self.resize_label = tk.Label(self.left_frame, text="Resize Factor:")
         self.resize_label.pack(pady=5)
@@ -69,17 +79,21 @@ class ImageEditorApp:
 
         # Save Buttons
         self.save_button = tk.Button(self.right_frame, text="Save Image", command=self.save_image, state=tk.DISABLED)
-        self.save_button.pack(pady=10)
+        self.save_button.pack(pady=5)
 
         self.save_all_button = tk.Button(self.right_frame, text="Save All Images", command=self.save_all_images, state=tk.DISABLED)
-        self.save_all_button.pack(pady=10, fill=tk.X)
+        self.save_all_button.pack(pady=5, fill=tk.X)
 
         self.colors_listbox.bind("<Double-1>", self.edit_color)
+        self.image_listbox.bind("<Double-1>", self.edit_all_colors)
 
     def change_states(self, state):
         self.delete_button.config(state=state)
+        self.clear_button.config(state=state)
         self.edit_color_button.config(state=state)
         self.edit_all_colors_button.config(state=state)
+        self.reset_changes_button.config(state=state)
+        self.reset_all_changes_button.config(state=state)
         self.save_button.config(state=state)
         self.save_all_button.config(state=state)
 
@@ -120,7 +134,7 @@ class ImageEditorApp:
         
         return ', '.join(reversed(words)).strip()
 
-    def add_image(self, event=None):
+    def add_image(self):
         file_paths = filedialog.askopenfilenames(filetypes=[("PNG Files", "*.png")])
         if file_paths:
             try:
@@ -137,7 +151,7 @@ class ImageEditorApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load image: {e}")
 
-    def delete_image(self, event=None):
+    def delete_image(self):
         selected_indices = self.image_listbox.curselection()
         if not selected_indices:
             return
@@ -150,6 +164,18 @@ class ImageEditorApp:
             self.original_preview.config(image="")
             self.edited_preview.config(image="")
             self.colors_listbox.delete(0, tk.END)
+
+        self.update_image_listbox()
+        self.update_previews()
+        self.update_colors_listbox()
+
+    def clear_all_images(self):
+        self.images.clear()
+
+        self.change_states(tk.DISABLED)
+        self.original_preview.config(image="")
+        self.edited_preview.config(image="")
+        self.colors_listbox.delete(0, tk.END)
 
         self.update_image_listbox()
         self.update_previews()
@@ -206,6 +232,37 @@ class ImageEditorApp:
                         original_color = color
                         edited_color = img_data["colors"].get(color, color)
                         self.colors_listbox.insert(tk.END, f"{original_color} - {edited_color}")
+    
+    def reset_changes(self):
+        selected_indices = self.image_listbox.curselection()
+        if not selected_indices:
+            return
+
+        for index in selected_indices:
+            img_data = self.images[index]
+            img_data["edited_image"] = img_data["image"].copy()  # Reset edited image to original image
+            img_data["colors"].clear()  # Clear any color modifications
+
+        self.update_previews()  # Refresh the image previews
+        self.update_colors_listbox()  # Refresh the colors list
+        if len(self.images) == 1:
+            messagebox.showinfo("Reset Successful", f"Changes have been reset for {self.num_to_words(len(self.images))} image.")
+        else:
+            messagebox.showinfo("Reset Successful", f"Changes have been reset for {self.num_to_words(len(self.images))} images.")
+
+    def reset_all_changes(self):
+        if not self.images:
+            return
+        
+        for img_data in self.images:
+            img_data["edited_image"] = img_data["image"].copy()  # Reset edited image to original
+            img_data["colors"].clear()  # Clear any color modifications
+
+        # Update the UI to reflect the changes
+        self.update_previews()
+        self.update_colors_listbox()
+
+        messagebox.showinfo("Success", "All changes have been reset.")
 
     def edit_color(self, event=None):
         selected_index = self.colors_listbox.curselection()
@@ -229,12 +286,23 @@ class ImageEditorApp:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to parse color: {e}")
             return
+    
+        if "edit_color" in self.open_toplevels:
+            self.open_toplevels["edit_color"].focus()
+            return
 
         # Create the Toplevel window
         toplevel = Toplevel(self.root)
+        self.open_toplevels["edit_color"] = toplevel
         toplevel.title("Edit Color")
         toplevel.geometry("200x200")
         toplevel.resizable(False, False)
+
+        def on_close():
+            del self.open_toplevels["edit_color"]
+            toplevel.destroy()
+        
+        toplevel.protocol("WM_DELETE_WINDOW", on_close)
 
         # Variables for Spinboxes
         red_var = tk.IntVar(value=original_color[0])
@@ -284,17 +352,29 @@ class ImageEditorApp:
                     self.update_previews()
                     self.update_colors_listbox()  # Refresh the colors list
 
-            toplevel.destroy()
+            on_close()
 
         apply_button = tk.Button(toplevel, text="Apply", command=apply_color_changes)
         apply_button.grid(row=5, column=0, columnspan=2, pady=10)
 
-    def edit_all_colors(self):
+    def edit_all_colors(self, event=None):
+        if len(self.images) == 0:
+            return
+        if "edit_all_colors" in self.open_toplevels:
+            self.open_toplevels["edit_all_colors"].focus()
+            return
         # Create the Toplevel window to edit all colors
         toplevel = Toplevel(self.root)
+        self.open_toplevels["edit_all_colors"] = toplevel
         toplevel.title("Edit All Colors")
         toplevel.geometry("400x400")
         toplevel.resizable(False, False)
+
+        def on_close():
+            del self.open_toplevels["edit_all_colors"]
+            toplevel.destroy()
+        
+        toplevel.protocol("WM_DELETE_WINDOW", on_close)
 
         # Listbox to display colors
         all_colors_listbox = tk.Listbox(toplevel, selectmode=tk.SINGLE, width=40)
@@ -342,11 +422,21 @@ class ImageEditorApp:
         all_colors_listbox.bind("<Double-1>", edit_color_from_all_colors)
 
     def edit_color_for_all(self, original_color, update_all_colors_listbox):
+        if "edit_color_for_all" in self.open_toplevels:
+            self.open_toplevels["edit_color_for_all"].focus()
+            return
         # Create Toplevel for color editing for all images
         toplevel = Toplevel(self.root)
+        self.open_toplevels["edit_color_for_all"] = toplevel
         toplevel.title("Edit Color")
         toplevel.geometry("200x200")
         toplevel.resizable(False, False)
+
+        def on_close():
+            del self.open_toplevels["edit_color_for_all"]
+            toplevel.destroy()
+        
+        toplevel.protocol("WM_DELETE_WINDOW", on_close)
 
         # Variables for Spinboxes
         red_var = tk.IntVar(value=original_color[0])
@@ -393,7 +483,7 @@ class ImageEditorApp:
             self.update_previews()
             self.update_colors_listbox()  # Refresh the main colors listbox
             update_all_colors_listbox()
-            toplevel.destroy()
+            on_close()
 
         apply_button = tk.Button(toplevel, text="Apply", command=apply_color_changes)
         apply_button.grid(row=5, column=0, columnspan=2, pady=10)
