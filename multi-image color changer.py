@@ -11,6 +11,7 @@ class ImageEditorApp:
 
         self.images = []  # Stores dictionaries with image data
         self.open_toplevels = {}  # Track open Toplevels by a unique key
+        self.custom_colors = {}  # Track changed colors of images
         self.selected_image_index = None
 
         # Frames for layout
@@ -65,7 +66,7 @@ class ImageEditorApp:
 
         # Colors Listbox
         self.colors_label = tk.Label(self.right_frame, text="Colors")
-        self.colors_label.pack()
+        self.colors_label.pack(pady=5)
 
         self.colors_listbox = tk.Listbox(self.right_frame, selectmode=tk.SINGLE, width=40)
         self.colors_listbox.pack(pady=5)
@@ -81,6 +82,9 @@ class ImageEditorApp:
         self.save_button = tk.Button(self.right_frame, text="Save Image", command=self.save_image, state=tk.DISABLED)
         self.save_button.pack(pady=5)
 
+        self.save_as_button = tk.Button(self.right_frame, text="Save Image As", command=self.save_image_as, state=tk.DISABLED)
+        self.save_as_button.pack(pady=5)
+
         self.save_all_button = tk.Button(self.right_frame, text="Save All Images", command=self.save_all_images, state=tk.DISABLED)
         self.save_all_button.pack(pady=5, fill=tk.X)
 
@@ -95,6 +99,7 @@ class ImageEditorApp:
         self.reset_changes_button.config(state=state)
         self.reset_all_changes_button.config(state=state)
         self.save_button.config(state=state)
+        self.save_as_button.config(state=state)
         self.save_all_button.config(state=state)
 
     def num_to_words(self, num):
@@ -195,10 +200,20 @@ class ImageEditorApp:
             self.image_listbox.insert(tk.END, name)
 
     def update_previews(self, event=None):
+        if "edit_all_colors" in self.open_toplevels:
+            self.open_toplevels["edit_all_colors_update"]()
+            
         if self.selected_image_index is not None and len(self.images) != 0:
             img_data = self.images[self.selected_image_index]
+            
+            # If the path has changed (after save), reload the image
+            if img_data["path"] != img_data.get("previous_path"):
+                img_data["previous_path"] = img_data["path"]
+                # Reload the image based on the updated path
+                updated_image = Image.open(img_data["path"]).convert("RGBA")
+                img_data["image"] = updated_image
+                img_data["edited_image"] = updated_image.copy()
 
-            # Get original dimensions
             original_width, original_height = img_data["image"].size
 
             # Calculate 4 times the original dimensions
@@ -221,6 +236,9 @@ class ImageEditorApp:
             self.edited_preview.config(image="")
 
     def update_colors_listbox(self):
+        if "edit_all_colors" in self.open_toplevels:
+            self.open_toplevels["edit_all_colors_update"]()
+            
         self.colors_listbox.delete(0, tk.END)
         if self.selected_image_index is not None and len(self.images) != 0:
             img_data = self.images[self.selected_image_index]
@@ -245,6 +263,7 @@ class ImageEditorApp:
 
         self.update_previews()  # Refresh the image previews
         self.update_colors_listbox()  # Refresh the colors list
+        self.custom_colors.clear()
         if len(self.images) == 1:
             messagebox.showinfo("Reset Successful", f"Changes have been reset for {self.num_to_words(len(self.images))} image.")
         else:
@@ -261,6 +280,7 @@ class ImageEditorApp:
         # Update the UI to reflect the changes
         self.update_previews()
         self.update_colors_listbox()
+        self.custom_colors.clear()
 
         messagebox.showinfo("Success", "All changes have been reset.")
 
@@ -272,26 +292,21 @@ class ImageEditorApp:
         color_line = self.colors_listbox.get(selected_index[0])
 
         try:
-            # Extract the part before the " - " separator
             original_color_str = color_line.split(" - ")[1]
-            
-            # Remove parentheses and split by commas
             original_color = tuple(map(int, original_color_str.strip("()").split(",")))
 
-            # Ensure the tuple has 4 elements (RGBA)
             if len(original_color) == 3:
-                original_color = original_color + (255,)  # Add default alpha value
+                original_color = original_color + (255,)
             elif len(original_color) != 4:
                 raise ValueError("Invalid color format")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to parse color: {e}")
             return
-    
+
         if "edit_color" in self.open_toplevels:
             self.open_toplevels["edit_color"].focus()
             return
 
-        # Create the Toplevel window
         toplevel = Toplevel(self.root)
         self.open_toplevels["edit_color"] = toplevel
         toplevel.title("Edit Color")
@@ -301,61 +316,62 @@ class ImageEditorApp:
         def on_close():
             del self.open_toplevels["edit_color"]
             toplevel.destroy()
-        
+
         toplevel.protocol("WM_DELETE_WINDOW", on_close)
 
-        # Variables for Spinboxes
         red_var = tk.IntVar(value=original_color[0])
         green_var = tk.IntVar(value=original_color[1])
         blue_var = tk.IntVar(value=original_color[2])
         alpha_var = tk.IntVar(value=original_color[3])
 
-        # Create Spinboxes and Labels
         tk.Label(toplevel, text="Red:").grid(row=1, column=0, sticky="e", pady=5)
-        red_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=red_var, width=5)
-        red_spinbox.grid(row=1, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=red_var, width=5).grid(row=1, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Green:").grid(row=2, column=0, sticky="e", pady=5)
-        green_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=green_var, width=5)
-        green_spinbox.grid(row=2, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=green_var, width=5).grid(row=2, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Blue:").grid(row=3, column=0, sticky="e", pady=5)
-        blue_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=blue_var, width=5)
-        blue_spinbox.grid(row=3, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=blue_var, width=5).grid(row=3, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Alpha:").grid(row=4, column=0, sticky="e", pady=5)
-        alpha_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=alpha_var, width=5)
-        alpha_spinbox.grid(row=4, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=alpha_var, width=5).grid(row=4, column=1, sticky="w", pady=5)
 
-        # Apply Button
         def apply_color_changes():
             new_color = (red_var.get(), green_var.get(), blue_var.get(), alpha_var.get())
+
             if self.selected_image_index is not None and len(self.images) != 0:
                 img_data = self.images[self.selected_image_index]
 
-                # Only apply the change to the specific color selected
-                if original_color != new_color:
-                    img_data["colors"][original_color] = new_color  # Store the new color mapping
+                # Retrieve the true original color from custom_colors if new_color already exists
+                true_original_color = next(
+                    (key for key, value in self.custom_colors.items() if value == new_color),
+                    original_color
+                )
 
-                    # Apply changes incrementally: don't reset the edited image, just apply the new color
-                    edited_image = img_data["image"].copy()
-                    pixels = edited_image.load()
+                if true_original_color != new_color:
+                    # Update the global custom_colors mapping
+                    self.custom_colors[true_original_color] = new_color
 
-                    # Apply all color changes sequentially
-                    for original, replacement in img_data["colors"].items():
-                        for y in range(edited_image.height):
-                            for x in range(edited_image.width):
-                                if pixels[x, y] == original:
-                                    pixels[x, y] = replacement
+                    # Update the mapping for the original color in the specific image
+                    img_data["colors"][true_original_color] = new_color
 
-                    img_data["edited_image"] = edited_image
+                    # Reapply all custom colors for the specific image
+                    original_image = img_data["image"].copy()
+                    pixels = original_image.load()
+
+                    # Apply custom color mappings to the original image
+                    for y in range(original_image.height):
+                        for x in range(original_image.width):
+                            current_pixel = pixels[x, y]
+                            if current_pixel in self.custom_colors:
+                                pixels[x, y] = self.custom_colors[current_pixel]
+
+                    img_data["edited_image"] = original_image
                     self.update_previews()
-                    self.update_colors_listbox()  # Refresh the colors list
+                    self.update_colors_listbox()
+                    on_close()
 
-            on_close()
-
-        apply_button = tk.Button(toplevel, text="Apply", command=apply_color_changes)
-        apply_button.grid(row=5, column=0, columnspan=2, pady=10)
+        tk.Button(toplevel, text="Apply", command=apply_color_changes).grid(row=5, column=0, columnspan=2, pady=10)
 
     def edit_all_colors(self, event=None):
         if len(self.images) == 0:
@@ -365,13 +381,13 @@ class ImageEditorApp:
             return
         # Create the Toplevel window to edit all colors
         toplevel = Toplevel(self.root)
-        self.open_toplevels["edit_all_colors"] = toplevel
         toplevel.title("Edit All Colors")
         toplevel.geometry("400x400")
         toplevel.resizable(False, False)
 
         def on_close():
             del self.open_toplevels["edit_all_colors"]
+            del self.open_toplevels["edit_all_colors_update"]
             toplevel.destroy()
         
         toplevel.protocol("WM_DELETE_WINDOW", on_close)
@@ -396,14 +412,14 @@ class ImageEditorApp:
             all_colors_listbox.delete(0, tk.END)
             for color in get_all_unique_colors():
                 edited_color = color
-                for img_data in self.images:
-                    if color in img_data["colors"]:
-                        edited_color = img_data["colors"][color]
-                        break
+                if color in self.custom_colors:
+                    edited_color = self.custom_colors[color]
                 all_colors_listbox.insert(tk.END, f"{color} - {edited_color}")
 
         # Populate the listbox initially
         update_all_colors_listbox()
+        self.open_toplevels["edit_all_colors"] = toplevel
+        self.open_toplevels["edit_all_colors_update"] = update_all_colors_listbox
 
         # Edit selected color
         def edit_color_from_all_colors(event=None):
@@ -425,7 +441,7 @@ class ImageEditorApp:
         if "edit_color_for_all" in self.open_toplevels:
             self.open_toplevels["edit_color_for_all"].focus()
             return
-        # Create Toplevel for color editing for all images
+
         toplevel = Toplevel(self.root)
         self.open_toplevels["edit_color_for_all"] = toplevel
         toplevel.title("Edit Color")
@@ -435,58 +451,52 @@ class ImageEditorApp:
         def on_close():
             del self.open_toplevels["edit_color_for_all"]
             toplevel.destroy()
-        
+
         toplevel.protocol("WM_DELETE_WINDOW", on_close)
 
-        # Variables for Spinboxes
         red_var = tk.IntVar(value=original_color[0])
         green_var = tk.IntVar(value=original_color[1])
         blue_var = tk.IntVar(value=original_color[2])
         alpha_var = tk.IntVar(value=original_color[3])
 
-        # Create Spinboxes and Labels
         tk.Label(toplevel, text="Red:").grid(row=1, column=0, sticky="e", pady=5)
-        red_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=red_var, width=5)
-        red_spinbox.grid(row=1, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=red_var, width=5).grid(row=1, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Green:").grid(row=2, column=0, sticky="e", pady=5)
-        green_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=green_var, width=5)
-        green_spinbox.grid(row=2, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=green_var, width=5).grid(row=2, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Blue:").grid(row=3, column=0, sticky="e", pady=5)
-        blue_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=blue_var, width=5)
-        blue_spinbox.grid(row=3, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=blue_var, width=5).grid(row=3, column=1, sticky="w", pady=5)
 
         tk.Label(toplevel, text="Alpha:").grid(row=4, column=0, sticky="e", pady=5)
-        alpha_spinbox = tk.Spinbox(toplevel, from_=0, to=255, textvariable=alpha_var, width=5)
-        alpha_spinbox.grid(row=4, column=1, sticky="w", pady=5)
+        tk.Spinbox(toplevel, from_=0, to=255, textvariable=alpha_var, width=5).grid(row=4, column=1, sticky="w", pady=5)
 
-        # Apply changes for all images
         def apply_color_changes():
             new_color = (red_var.get(), green_var.get(), blue_var.get(), alpha_var.get())
-            for img_data in self.images:
-                img_data["colors"][original_color] = new_color  # Store the new color mapping
 
-                # Reset the edited image to the original image
-                edited_image = img_data["image"].copy()
-                pixels = edited_image.load()
+            if original_color != new_color:
+                # Update the custom_colors dictionary
+                self.custom_colors[original_color] = new_color
 
-                # Apply all color changes sequentially
-                for original, replacement in img_data["colors"].items():
-                    for y in range(edited_image.height):
-                        for x in range(edited_image.width):
-                            if pixels[x, y] == original:
-                                pixels[x, y] = replacement
+                for img_data in self.images:
+                    original_image = img_data["image"].copy()
+                    pixels = original_image.load()
 
-                img_data["edited_image"] = edited_image
+                    # Apply custom color mappings to the original image
+                    for y in range(original_image.height):
+                        for x in range(original_image.width):
+                            current_pixel = pixels[x, y]
+                            if current_pixel in self.custom_colors:
+                                pixels[x, y] = self.custom_colors[current_pixel]
+
+                    img_data["edited_image"] = original_image
 
             self.update_previews()
-            self.update_colors_listbox()  # Refresh the main colors listbox
+            self.update_colors_listbox()
             update_all_colors_listbox()
             on_close()
 
-        apply_button = tk.Button(toplevel, text="Apply", command=apply_color_changes)
-        apply_button.grid(row=5, column=0, columnspan=2, pady=10)
+        tk.Button(toplevel, text="Apply", command=apply_color_changes).grid(row=5, column=0, columnspan=2, pady=10)
 
     def save_image(self):
         if self.selected_image_index is not None and len(self.images) != 0:
@@ -500,11 +510,39 @@ class ImageEditorApp:
             img_data["image"] = saved_image
             img_data["edited_image"] = saved_image.copy()
 
+            self.custom_colors.clear()
+
             self.update_image_listbox()
             self.update_colors_listbox()
             self.update_previews()
             messagebox.showinfo("Success", f"{img_path} saved successfully.")
 
+    def save_image_as(self):
+        if self.selected_image_index is not None and len(self.images) != 0:
+            img_data = self.images[self.selected_image_index]
+            
+            # Ask the user for a new file path using a file dialog
+            new_img_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG files", "*.png"), ("JPEG files", "*.jpg;*.jpeg"), ("All files", "*.*")])
+            
+            if new_img_path:  # User canceled the dialog
+                img_data["edited_image"].save(new_img_path)
+            
+                # Update the image path and reload the image
+                img_data["path"] = new_img_path
+                saved_image = Image.open(new_img_path).convert("RGBA")
+                img_data["image"] = saved_image
+                img_data["edited_image"] = saved_image.copy()
+
+                # Clear any custom color modifications
+                self.custom_colors.clear()
+
+                # Update UI components like listboxes and previews
+                self.update_image_listbox()
+                self.update_colors_listbox()
+                self.update_previews()
+
+                messagebox.showinfo("Success", f"Image saved as {filename(new_img_path)}.")
+    
     def save_all_images(self):
         for img_data in self.images:
             img_data["edited_image"].save(img_data["path"])
@@ -516,6 +554,9 @@ class ImageEditorApp:
 
         for img_data in self.images:
             img_data["colors"] = {}
+        
+        self.custom_colors.clear()
+
         self.update_image_listbox()
         self.update_colors_listbox()
         self.update_previews()
@@ -546,6 +587,8 @@ class ImageEditorApp:
             # Ensure the coordinates are within bounds
             if 0 <= original_x < original_width and 0 <= original_y < original_height:
                 pixel_color = original_image.getpixel((original_x, original_y))
+                if pixel_color[3] == 0:
+                    return
                 messagebox.showinfo("Pixel Color", f"Color: {pixel_color}")
     
     def on_edited_preview_click(self, event):
@@ -569,6 +612,8 @@ class ImageEditorApp:
             # Ensure the coordinates are within bounds
             if 0 <= edited_x < edited_width and 0 <= edited_y < edited_height:
                 pixel_color = edited_image.getpixel((edited_x, edited_y))
+                if pixel_color[3] == 0:
+                    return
                 messagebox.showinfo("Pixel Color", f"Color: {pixel_color}")
 
 if __name__ == "__main__":
